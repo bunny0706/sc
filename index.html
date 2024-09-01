@@ -1,0 +1,303 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Barcode Scanner</title>
+    <style>
+        body, html {
+            margin: 0;
+            padding: 0;
+            height: 100%;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            flex-direction: column;
+            background-color: #f0f0f0;
+            font-family: Arial, sans-serif;
+        }
+
+        h1 {
+            color: #333;
+            margin-bottom: 20px;
+        }
+
+        #interactive {
+            width: 640px;
+            height: 480px;
+            border: 2px solid #4CAF50;
+            border-radius: 8px;
+            background-color: #fff;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            margin-bottom: 20px;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+            overflow: hidden;
+            position: relative;
+        }
+
+        #interactive video {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+
+        #controls {
+            display: flex;
+            justify-content: center;
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+
+        #start-button, #stop-button {
+            padding: 10px 20px;
+            font-size: 16px;
+            cursor: pointer;
+            border: none;
+            border-radius: 5px;
+            background-color: #4CAF50;
+            color: white;
+            transition: background-color 0.3s;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
+
+        #start-button:hover, #stop-button:hover {
+            background-color: #45a049;
+        }
+
+        #stop-button:disabled {
+            background-color: #ccc;
+            cursor: not-allowed;
+        }
+
+        #scanned-products-container {
+            width: 640px;
+            max-height: 300px;
+            overflow-y: scroll;
+            background-color: #fff;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+            padding: 10px;
+            margin-bottom: 20px;
+        }
+
+        #scanned-products {
+            list-style: none;
+            padding: 0;
+            margin: 0;
+        }
+
+        #scanned-products li {
+            margin: 10px 0;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            background-color: #f9f9f9;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
+
+        .product-info {
+            text-align: left;
+            flex-grow: 1;
+        }
+
+        .quantity-controls {
+            display: flex;
+            align-items: center;
+        }
+
+        .quantity-controls button {
+            margin: 0 5px;
+            padding: 5px 10px;
+            font-size: 16px;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            transition: background-color 0.3s;
+        }
+
+        .quantity-controls button:hover {
+            background-color: #45a049;
+        }
+
+        .quantity {
+            font-size: 16px;
+            padding: 0 10px;
+        }
+    </style>
+</head>
+<body>
+    <h1>Barcode Scanner</h1>
+    <div id="interactive" class="viewport">
+        <video id="video" autoplay></video>
+    </div>
+    <div id="controls">
+        <button id="start-button">Start Scanning</button>
+        <button id="stop-button" disabled>Stop Scanning</button>
+    </div>
+    <div id="scanned-products-container">
+        <h2>Scanned Products</h2>
+        <ul id="scanned-products"></ul>
+    </div>
+
+    <script src="https://unpkg.com/quagga/dist/quagga.min.js"></script>
+    <script>
+        let scannedBarcodes = new Set();
+        let productQuantities = {};
+        let scanning = false;
+        let lastBarcode = "";
+        let debounceTimer = null;
+
+        function updateProductQuantity(barcode, increment) {
+            const productElement = document.querySelector(`[data-barcode="${barcode}"] .quantity`);
+            if (productElement) {
+                productQuantities[barcode] = Math.max(0, (productQuantities[barcode] || 0) + increment);
+                productElement.textContent = productQuantities[barcode];
+            }
+        }
+
+        function displayProductDetails(barcode) {
+            const details = {
+                "123456": {
+                    name: "Soap",
+                    price: "20 INR",
+                    weight: "50g",
+                    discount: "5%",
+                    expiryDate: "2024-12-31"
+                },
+                "789012": {
+                    name: "Shampoo",
+                    price: "120 INR",
+                    weight: "200ml",
+                    discount: "10%",
+                    expiryDate: "2024-11-30"
+                }
+            };
+
+            const productList = document.getElementById('scanned-products');
+            if (details[barcode]) {
+                if (!scannedBarcodes.has(barcode)) {
+                    scannedBarcodes.add(barcode);
+                    productQuantities[barcode] = 1;
+
+                    const product = document.createElement('li');
+                    product.setAttribute('data-barcode', barcode);
+                    product.innerHTML = `
+                        <div class="product-info">
+                            <p><strong>Name:</strong> ${details[barcode].name}</p>
+                            <p><strong>Price:</strong> ${details[barcode].price}</p>
+                            <p><strong>Weight:</strong> ${details[barcode].weight}</p>
+                            <p><strong>Discount:</strong> ${details[barcode].discount}</p>
+                            <p><strong>Expiry Date:</strong> ${details[barcode].expiryDate}</p>
+                        </div>
+                        <div class="quantity-controls">
+                            <button onclick="updateProductQuantity('${barcode}', -1)">-</button>
+                            <span class="quantity">${productQuantities[barcode]}</span>
+                            <button onclick="updateProductQuantity('${barcode}', 1)">+</button>
+                        </div>
+                    `;
+                    productList.appendChild(product);
+                } else {
+                    updateProductQuantity(barcode, 1);
+                }
+            } else {
+                productList.innerHTML += `<li>Product not found for barcode: ${barcode}</li>`;
+            }
+        }
+
+        function startScanning() {
+            if (!scanning) {
+                scanning = true;
+                Quagga.start();
+                document.getElementById('start-button').disabled = true;
+                document.getElementById('stop-button').disabled = false;
+            }
+        }
+
+        function stopScanning() {
+            if (scanning) {
+                scanning = false;
+                Quagga.stop();
+                document.getElementById('start-button').disabled = false;
+                document.getElementById('stop-button').disabled = true;
+            }
+        }
+
+        function setupQuagga() {
+            Quagga.init({
+                inputStream: {
+                    name: "Live",
+                    type: "LiveStream",
+                    target: document.querySelector('#interactive'),
+                    constraints: {
+                        facingMode: "environment",
+                        width: { ideal: 640 },
+                        height: { ideal: 480 }
+                    }
+                },
+                locator: {
+                    patchSize: "medium",
+                    halfSample: false
+                },
+                decoder: {
+                    readers: ["code_128_reader", "ean_reader", "ean_8_reader", "code_39_reader", "upc_reader"]
+                },
+                locate: true
+            }, function(err) {
+                if (err) {
+                    console.error("Initialization error:", err);
+                    alert("Error initializing the scanner: " + err.message);
+                    return;
+                }
+                console.log("Initialization finished. Ready to start scanning");
+            });
+
+            Quagga.onProcessed(function(result) {
+                if (result) {
+                    var drawingCtx = Quagga.canvas.ctx.overlay,
+                        drawingCanvas = Quagga.canvas.dom.overlay;
+
+                    if (result.boxes) {
+                        drawingCtx.clearRect(0, 0, drawingCanvas.width, drawingCanvas.height);
+                        result.boxes.filter(function (box) {
+                            return box !== result.box;
+                        }).forEach(function (box) {
+                            Quagga.ImageDebug.drawPath(box, {x: 0, y: 1}, drawingCtx, {color: "green", lineWidth: 2});
+                        });
+                    }
+
+                    if (result.box) {
+                        Quagga.ImageDebug.drawPath(result.box, {x: 0, y: 1}, drawingCtx, {color: "#00F", lineWidth: 2});
+                    }
+
+                    if (result.codeResult && result.codeResult.code) {
+                        clearTimeout(debounceTimer);
+                        debounceTimer = setTimeout(() => {
+                            if (result.codeResult.code !== lastBarcode) {
+                                lastBarcode = result.codeResult.code;
+                                console.log("Barcode detected and processed: [" + result.codeResult.code + "]", result);
+                                displayProductDetails(result.codeResult.code);
+                            }
+                        }, 1000);  // Adjust the debounce delay to avoid multiple detections
+                    }
+                }
+            });
+        }
+
+        document.getElementById('start-button').addEventListener('click', startScanning);
+        document.getElementById('stop-button').addEventListener('click', stopScanning);
+
+        setupQuagga();
+    </script>
+</body>
+</html>
